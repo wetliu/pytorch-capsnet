@@ -7,7 +7,7 @@ from torch.autograd import Variable
 
 class PrimaryCap(torch.nn.Module):
     def __init__(self, input_dim, output_dim, num_routing, input_atoms,
-                 output_atoms, stride, kernel_size, padding, leaky):
+                 output_atoms, stride, kernel_size, padding, leaky, use_cuda):
         super(PrimaryCap, self).__init__()
 
         self.input_dim = input_dim
@@ -15,6 +15,7 @@ class PrimaryCap(torch.nn.Module):
         self.output_atoms = output_atoms
         self.leaky = leaky
         self.input_atoms = input_atoms
+        self.use_cuda = use_cuda
 
         self.conv = nn.Conv2d(in_channels=input_atoms,
             out_channels=output_dim * (output_atoms),
@@ -46,17 +47,19 @@ class PrimaryCap(torch.nn.Module):
             output_dim=self.output_dim,
             num_routing=1,
             is_digit_cap=False,
-            leaky=False)
+            leaky=False,
+            use_cuda=self.use_cuda)
 
 class DigitCap(torch.nn.Module):
-    def __init__(self, input_dim, output_dim, input_atoms,# + coord_atom,
-                 output_atoms, num_routing, leaky):
+    def __init__(self, input_dim, output_dim, input_atoms,
+                 output_atoms, num_routing, leaky, use_cuda):
         super(DigitCap, self).__init__()
 
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.output_atoms = output_atoms
         self.leaky = leaky
+        self.use_cuda = use_cuda
 
         self.weights = nn.Parameter(torch.Tensor(input_dim, input_atoms, output_dim * output_atoms))
         nn.init.normal(self.weights.data, mean=0,std=0.1)
@@ -83,7 +86,8 @@ class DigitCap(torch.nn.Module):
             output_dim=self.output_dim,
             num_routing=3,
             is_digit_cap=True,
-            leaky=False)
+            leaky=False,
+            use_cuda=self.use_cuda)
 
 class Reconstruction(torch.nn.Module):
     def __init__(self, num_classes, num_atoms, layer_sizes, num_pixels):
@@ -120,6 +124,13 @@ class Reconstruction(torch.nn.Module):
         x = F.sigmoid(self.dense2(x))
         return x
 
+def _leaky_routing(logits, output_dim):
+    leak = torch.zeros_like(logits)
+    leak = torch.sum(leak, dim=2, keepdim=True)
+    leaky_logits = torch.cat([leak, logits], dim=2)
+    leaky_routing = F.softmax(leaky_logits, 2)
+    return torch.split(leaky_routing, [1, output_dim], dim=2)[1]
+
 def _routing(votes,
             biases,
             logit_shape,
@@ -128,7 +139,8 @@ def _routing(votes,
             output_dim,
             num_routing,
             is_digit_cap,
-            leaky=False):
+            leaky=False,
+            use_cuda=False):
     input_atom = votes.size(3)
     votes_t_shape = [3, 0, 1, 2]
     for i in range(num_dims - 4):
@@ -141,10 +153,16 @@ def _routing(votes,
     batch_size = votes.size(0)
     votes_trans_stopped = votes_trans.clone().detach()
 
-    logits = Variable(torch.zeros(logit_shape)).cuda()
+    logits = Variable(torch.from_numpy(np.full(logit_shape, 0.0, dtype=np.float32)), requires_grad=False)
+
+    if use_cuda:
+        logits = logits.cuda()
 
     for i in range(num_routing):
-        route = F.softmax(logits, 2)
+        if leaky:
+            route = _leaky_routing(logits, output_dim)
+        else:
+            route = F.softmax(logits, 2)
 
         if i == num_routing - 1:
             preactivate_unrolled = route * votes_trans

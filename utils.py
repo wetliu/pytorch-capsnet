@@ -23,7 +23,7 @@ def load_data(cfg):
         features = {'height':28,
                     'depth':1,
                     'num_classes':10,
-                    'num_samples':50000,
+                    'num_samples':60000,
                     'num_test_samples':10000}
 
     else:

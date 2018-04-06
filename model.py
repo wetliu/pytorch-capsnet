@@ -29,7 +29,8 @@ class Model(torch.nn.Module):
             stride=2,
             kernel_size=9,
             padding=0,
-            leaky=False,)
+            leaky=False,
+            use_cuda=self.cfg.use_cuda)
 
         self.digit_cap = layers.DigitCap(
             input_dim=6*6*self.cfg.num_primary_caps, # Here we need to specify the final size
@@ -37,7 +38,8 @@ class Model(torch.nn.Module):
             input_atoms=8,
             output_atoms=16,
             num_routing=self.cfg.num_routing,
-            leaky=self.cfg.leaky,)
+            leaky=self.cfg.leaky,
+            use_cuda=self.cfg.use_cuda)
 
         num_pixels = features['height'] * features['height'] * features['depth']
         self.reconstruction = layers.Reconstruction(
